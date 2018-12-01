@@ -1,0 +1,68 @@
+#!/usr/bin/env php
+<?php
+
+namespace AoC {
+
+    try {
+        main();
+    } catch (\Throwable $e) {
+        echo $e;
+        exit($e->getCode() ?: 1);
+    }
+
+    function main()
+    {
+        if (PHP_SAPI !== 'cli') {
+            echo 'Warning: not invoked from cli', PHP_EOL;
+            exit(1);
+        }
+
+        $f = new Frequency();
+        while (true) {
+            $fp = fopen('input.txt', 'r');
+            readStream($fp, $f);
+            echo $f->current() . PHP_EOL;
+            fclose($fp);
+        }
+
+        exit(1);
+    }
+
+    function readStream($fp, Frequency $f): void
+    {
+        while ($line = fscanf($fp, "%d\n")) {
+            $hasRepeated = $f->changeAndDetectRepetition($line[0] ?? 0);
+
+            if ($hasRepeated) {
+                fclose($fp);
+                echo 'Twice: ' . $f->current() . PHP_EOL;
+                exit(0);
+            }
+        }
+    }
+
+    class Frequency
+    {
+        private $current = 0;
+
+        private $pastFrequencies = [];
+
+        public function change(int $value): void
+        {
+            $this->pastFrequencies[$this->current] = 1;
+            $this->current += $value;
+        }
+
+        public function changeAndDetectRepetition(int $value): bool
+        {
+            $this->change($value);
+
+            return isset($this->pastFrequencies[$this->current]);
+        }
+
+        public function current(): int
+        {
+            return $this->current;
+        }
+    }
+}

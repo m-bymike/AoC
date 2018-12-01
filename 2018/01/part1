@@ -1,0 +1,51 @@
+#!/usr/bin/env php
+<?php
+
+namespace AoC {
+
+    try {
+        main();
+    } catch (\Throwable $e) {
+        echo $e;
+        exit($e->getCode() ?: 1);
+    }
+
+    function main()
+    {
+        if (PHP_SAPI !== 'cli') {
+            echo 'Warning: not invoked from cli', PHP_EOL;
+            exit(1);
+        }
+
+        $stdin = STDIN;
+        $f = new Frequency();
+
+        echo readStream($stdin, $f), PHP_EOL;
+
+        exit(0);
+    }
+
+    function readStream($fp, Frequency $f): int
+    {
+        while ($line = fscanf($fp, "%d\n")) {
+            $f->change($line[0] ?? 0);
+        }
+
+        return $f->current();
+    }
+
+    class Frequency
+    {
+        private $current = 0;
+
+        public function change(int $value): void
+        {
+            $this->current += $value;
+        }
+
+        public function current(): int
+        {
+            return $this->current;
+        }
+    }
+}
