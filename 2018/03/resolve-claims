@@ -1,0 +1,196 @@
+#!/usr/bin/env php
+<?php
+
+namespace AoC {
+
+    try {
+        ini_set('memory_limit', '512M');
+        main();
+    } catch (\Throwable $e) {
+        echo $e;
+        exit($e->getCode() ?: 1);
+    }
+
+    function main()
+    {
+        if (PHP_SAPI !== 'cli') {
+            echo 'Warning: not invoked from cli', PHP_EOL;
+            exit(1);
+        }
+
+        $stdin = STDIN;
+        $f = new Fabric();
+
+        /** @var Claim $claim */
+        foreach (readStream($stdin) as $claim) {
+            $f->claim($claim);
+        };
+
+        //echo $f->printConsole(), PHP_EOL;
+
+        echo PHP_EOL, PHP_EOL, 'Overlapping square inches: ', $f->squareInchesDoubleClaimed(), PHP_EOL;
+        echo 'Not overlapping claim ids: ', PHP_EOL;
+
+        /** @var Claim $nonOverlappingClaim */
+        foreach ($f->nonOverlappingClaims() as $nonOverlappingClaim) {
+            echo " - {$nonOverlappingClaim->getId()}", PHP_EOL;
+        }
+
+        exit(0);
+    }
+
+    function readStream($fp): \Generator
+    {
+        while ($line = fscanf($fp, "#%d @ %d,%d: %dx%d\n")) {
+            [$id, $x, $y, $w, $h] = $line;
+
+            yield new Claim($id, $x, $y, $w, $h);
+        }
+    }
+
+    class Fabric {
+
+        private $map = [];
+        /** @var Claim[] */
+        private $claims = [];
+        private $w = 0;
+        private $h = 0;
+
+        public function claim(Claim $claim): void
+        {
+            $x = $claim->getX();
+            $y = $claim->getY();
+
+            for ($i = $claim->getW(); $i > 0; --$i) {
+                $cx = $x + $i;
+                if (!isset($this->map[$cx])) {
+                    $this->map[$cx] = [];
+                }
+
+                $cRow = & $this->map[$cx];
+
+                $this->w = max($this->w, $cx);
+
+                for ($ii = $claim->getH(); $ii > 0; --$ii) {
+                    $cy = $y + $ii;
+                    if (!isset($cRow[$cy])) {
+                        $cRow[$cy] = [$claim];
+                    } else {
+                        $cRow[$cy][] = $claim;
+                        $claim->overlaps(true);
+                        $cRow[$cy][0]->overlaps(true);
+                    }
+
+                    $this->h = max($this->h, $cy);
+                }
+            }
+
+            $this->claims[] = $claim;
+        }
+
+        public function printConsole(): string
+        {
+            $out = '';
+
+            for ($x = 0; $x < $this->w; ++$x) {
+                for ($y = 0; $y < $this->h; ++$y) {
+                    $nrOfClaims = count(($this->map[$x] ?? [])[$y] ?? []);
+                    if ($nrOfClaims > 1) {
+                        $out .= 'X';
+                    } elseif ($nrOfClaims ===1) {
+                        $out .= '1';
+                    } else {
+                        $out .= '.';
+                    }
+                }
+
+                $out .= PHP_EOL;
+            }
+
+            return $out;
+        }
+
+        public function squareInchesDoubleClaimed(): int
+        {
+            $count = 0;
+            foreach ($this->map as $row) {
+                foreach ($row as $cell) {
+                    if (count($cell) > 1) {
+                        ++$count;
+                    }
+                }
+            }
+
+            return $count;
+        }
+
+        public function nonOverlappingClaims(): \Generator
+        {
+            foreach ($this->claims as $claim) {
+                if (!$claim->overlaps()) {
+                    yield $claim;
+                }
+            }
+        }
+
+    }
+
+    class Claim
+    {
+        /** @var int */
+        private $id;
+        /** @var int */
+        private $x;
+        /** @var int */
+        private $y;
+        /** @var int */
+        private $w;
+        /** @var int */
+        private $h;
+        /** @var bool */
+        private $overlaps = false;
+
+        public function __construct(int $id, int $x, int $y, int $w, int $h)
+        {
+            $this->id = $id;
+            $this->x = $x;
+            $this->y = $y;
+            $this->w = $w;
+            $this->h = $h;
+        }
+
+        public function getId(): int
+        {
+            return $this->id;
+        }
+
+        public function getX(): int
+        {
+            return $this->x;
+        }
+
+        public function getY(): int
+        {
+            return $this->y;
+        }
+
+        public function getW(): int
+        {
+            return $this->w;
+        }
+
+        public function getH(): int
+        {
+            return $this->h;
+        }
+
+        public function overlaps(bool $overlaps = null): bool
+        {
+            if ($overlaps === null) {
+                return $this->overlaps;
+            }
+
+            return $this->overlaps = $overlaps;
+        }
+    }
+}
