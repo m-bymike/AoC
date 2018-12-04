@@ -1,0 +1,245 @@
+#!/usr/bin/env php
+<?php
+
+namespace AoC {
+
+    try {
+        ini_set('memory_limit', '512M');
+        main();
+    } catch (\Throwable $e) {
+        echo $e;
+        exit($e->getCode() ?: 1);
+    }
+
+    function main()
+    {
+        if (PHP_SAPI !== 'cli') {
+            echo 'Warning: not invoked from cli', PHP_EOL;
+            exit(1);
+        }
+
+        $stdin = STDIN;
+
+        $eventStream = new EventStream;
+
+        /** @var Event $claim */
+        foreach (readInput($stdin) as $event) {
+            $eventStream->register($event);
+        };
+
+        $stats = GuardStats::fromEventStream($eventStream);
+        printStats($stats);
+
+
+        exit(0);
+    }
+
+    function printStats(GuardStats $stats): void
+    {
+        [$id, $total, $fav] = ($stats->recordSleeper());
+        $result = $id * $fav;
+
+        echo "Strategy 1:\n";
+        echo " - Guard #{$id}\n";
+        echo " - Total minutes asleep: {$total}\n";
+        echo " - Favourite minute: {$fav}\n";
+        echo " - Result: {$result}\n";
+
+        echo "\n";
+
+        [$id, $fav] = $stats->mostFrequentlyAsleep();
+        $result = $id * $fav;
+
+        echo "Strategy 2:\n";
+        echo " - Guard #{$id}\n";
+        echo " - Favourite minute: {$fav}\n";
+        echo " - Result: {$result}\n";
+    }
+
+    function readInput($fp): \Generator
+    {
+        $regExp = '/^\[([\d :-]+)\] ([\w\d# ]+)$/si';
+        $regExp2 = '/^Guard \#(\d+) begins shift$/si';
+
+        while ($line = fgets($fp)) {
+            if (preg_match($regExp, $line, $matches) !== 1) {
+                throw new \ErrorException('unknown line: ' . $line);
+            }
+
+            [, $timestamp, $event] = $matches;
+
+            $timestamp = new \DateTime($timestamp . ':00');
+
+            if ($event === 'wakes up') {
+                yield new WokeUpEvent($timestamp);
+            } elseif ($event === 'falls asleep') {
+                yield new FellAsleepEvent($timestamp);
+            } elseif (preg_match($regExp2, $event, $matches) === 1) {
+                [,$guardId] = $matches;
+                yield new BeganShiftEvent((int) $guardId, $timestamp);
+            } else {
+                throw new \ErrorException('unknown event: ' . $line);
+            }
+        }
+    }
+
+    class GuardStats {
+        private $totalMinutesOfSleepPerGuard = [];
+        private $favouriteMinutesPerGuard = [];
+        private $guardOnDuty = -1;
+        private $fellAsleepAt = null;
+
+        public static function fromEventStream(EventStream $stream): self
+        {
+            $self = new self;
+            /** @var Event $event */
+            foreach ($stream->replay() as $event) {
+                $self->on($event);
+            }
+
+            return $self;
+        }
+
+        public function on(Event $event): void
+        {
+            if ($event instanceof BeganShiftEvent) {
+                $this->guardOnDuty = $event->guardId();
+            } elseif ($event instanceof FellAsleepEvent) {
+                $this->fellAsleepAt = $event->timestamp();
+            } elseif ($event instanceof WokeUpEvent) {
+                $diff = $event->timestamp()->diff($this->fellAsleepAt, true);
+                $this->calcSleepTotal($diff, $this->guardOnDuty);
+                $this->calcFavMins($this->fellAsleepAt, $diff, $this->guardOnDuty);
+            }
+        }
+
+        private function calcSleepTotal(\DateInterval $diff, int $guardId): void
+        {
+            $minutesAsleep = $diff->i + $diff->h * 60;
+            $total = $this->totalMinutesOfSleepPerGuard[$guardId] ?? 0;
+            $this->totalMinutesOfSleepPerGuard[$guardId] = $total + $minutesAsleep;
+        }
+
+        private function calcFavMins(\DateTime $asleep, \DateInterval $diff, int $guardId): void
+        {
+            if (!isset($this->favouriteMinutesPerGuard[$guardId])) {
+                $this->favouriteMinutesPerGuard[$guardId] = array_fill(0, 60, 0);
+            }
+
+            $minute = (int) $asleep->format('i');
+            $wokeUp = $minute + $diff->i;
+
+            for (; $minute < $wokeUp; ++$minute) {
+                ++$this->favouriteMinutesPerGuard[$guardId][$minute];
+            }
+        }
+
+        public function recordSleeper(): array
+        {
+            $totals = $this->totalMinutesOfSleepPerGuard;
+            arsort($totals, SORT_NATURAL);
+            reset($totals);
+            $guardId = key($totals);
+
+            return [
+                $guardId,
+                $totals[$guardId],
+                $this->findFavouriteMinute($guardId),
+            ];
+        }
+
+        public function findFavouriteMinute(int $guardId): int
+        {
+            $totals = $this->favouriteMinutesPerGuard[$guardId];
+            arsort($totals, SORT_NATURAL);
+            reset($totals);
+            $minute = key($totals);
+
+            return $minute;
+        }
+
+        public function mostFrequentlyAsleep()
+        {
+            $guards = array_map('max', $this->favouriteMinutesPerGuard);
+            arsort($guards, SORT_NATURAL);
+            reset($guards);
+            $guardId = key($guards);
+
+            return [
+                $guardId,
+                $this->findFavouriteMinute($guardId),
+            ];
+
+        }
+    }
+
+    class EventStream {
+        /** @var Event[] */
+        private $stream = [];
+
+        /** @var bool */
+        private $sorted = false;
+
+        public function register(Event $event): void {
+            $this->stream[] = $event;
+        }
+
+        public function replay(): \Generator
+        {
+            $this->sortEvents();
+
+            foreach ($this->stream as $event) {
+                yield $event;
+            }
+        }
+
+        private function sortEvents()
+        {
+            if ($this->sorted) return;
+
+            usort($this->stream, function (Event $a, Event $b): int {
+                return $a->timestamp() > $b->timestamp() ? 1 : -1;
+            });
+
+            $this->sorted = true;
+        }
+    }
+
+    abstract class Event {
+
+        /** @var \DateTime */
+        private $timestamp;
+
+        public function __construct(\DateTime $timestamp)
+        {
+            $this->timestamp = $timestamp;
+        }
+
+        public function timestamp(): \DateTime
+        {
+            return $this->timestamp;
+        }
+    }
+
+    class BeganShiftEvent extends Event {
+
+        /** @var int */
+        private $guardId;
+
+        public function __construct(int $guardId, \DateTime $timestamp)
+        {
+            parent::__construct($timestamp);
+            $this->guardId = $guardId;
+        }
+
+        public function guardId(): int
+        {
+            return $this->guardId;
+        }
+    }
+
+    class FellAsleepEvent extends Event {}
+
+    class WokeUpEvent extends Event {}
+
+}
